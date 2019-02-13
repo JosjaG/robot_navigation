@@ -79,8 +79,20 @@ void DluxGlobalPlanner::initialize(const ros::NodeHandle& parent, const std::str
   if (publish_potential)
     potential_pub_.init(planner_nh, "potential_grid", "potential");
 
+  interp_sub_ = planner_nh.subscribe<geometry_msgs::PoseStamped>("/dory/interpolator_pose", 1,  //UGLY HARDCODED NAMESPACE
+                                                         boost::bind(&DluxGlobalPlanner::interpCB, this, _1));
+  replan_pub_ = planner_nh.advertise<geometry_msgs::Pose2D>("replan", 1000);
+  max_interp_distance_=1.25;
+
   planner_nh.param("print_statistics", print_statistics_, false);
 }
+
+void DluxGlobalPlanner::interpCB(const geometry_msgs::PoseStamped::ConstPtr& interp)
+  {
+    interp_ = nav_2d_utils::poseStampedToPose2D(*interp);
+    // publishPointMarker(interp_, false);
+    // plan();
+  }
 
 bool DluxGlobalPlanner::isPlanValid(const nav_2d_msgs::Path2D& path) const
 {
@@ -104,8 +116,32 @@ nav_2d_msgs::Path2D DluxGlobalPlanner::makePlan(const nav_2d_msgs::Pose2DStamped
   if (potential_grid_.getInfo() != costmap_->getInfo())
     potential_grid_.setInfo(costmap_->getInfo());
 
-  geometry_msgs::Pose2D local_start = nav_2d_utils::transformStampedPose(tf_, start, potential_grid_.getFrameId());
+  dist_interp_ = sqrt(pow(start.pose.x-interp_.pose.x,2)+pow(start.pose.y-interp_.pose.y,2));
+  if (dist_interp_>max_interp_distance_)
+    {
+    if (print_statistics_)
+      {
+      ROS_INFO_NAMED("DluxGlobalPlanner",
+                   "USING BASE LINK, dist = %.2f .", dist_interp_);
+      }
+    temp_start_.pose.x = start.pose.x;
+    temp_start_.pose.y = start.pose.y;
+    } else {
+      if (print_statistics_)
+        {
+        ROS_INFO_NAMED("DluxGlobalPlanner",
+                   "USING INTERP NODE, dist = %.2f .", dist_interp_);
+        }
+      temp_start_.pose.x = interp_.pose.x;
+      temp_start_.pose.y = interp_.pose.y;
+    }
+    temp_start_.header = start.header;
+  
+  // start = temp_start_;
+  geometry_msgs::Pose2D local_start = nav_2d_utils::transformStampedPose(tf_, temp_start_, potential_grid_.getFrameId());
   geometry_msgs::Pose2D local_goal = nav_2d_utils::transformStampedPose(tf_, goal, potential_grid_.getFrameId());
+
+  replan_pub_.publish(local_start);
 
   nav_core2::Costmap& costmap = *costmap_;
   const nav_grid::NavGridInfo& info = costmap.getInfo();
@@ -115,12 +151,12 @@ nav_2d_msgs::Path2D DluxGlobalPlanner::makePlan(const nav_2d_msgs::Pose2DStamped
   if (!worldToGridBounded(info, local_start.x, local_start.y, x, y))
   {
     cached_path_cost_ = -1.0;
-    throw nav_core2::StartBoundsException(start);
+    throw nav_core2::StartBoundsException(temp_start_);
   }
   if (costmap(x, y) >= costmap.INSCRIBED_INFLATED_OBSTACLE)
   {
     cached_path_cost_ = -1.0;
-    throw nav_core2::OccupiedStartException(start);
+    throw nav_core2::OccupiedStartException(temp_start_);
   }
   if (!worldToGridBounded(info, local_goal.x, local_goal.y, x, y))
   {
@@ -147,7 +183,7 @@ nav_2d_msgs::Path2D DluxGlobalPlanner::makePlan(const nav_2d_msgs::Pose2DStamped
   unsigned int n_updated = calculator_->updatePotentials(potential_grid_, local_start, local_goal);
   potential_pub_.publish();
   double path_cost = 0.0;  // right now we don't do anything with the cost
-  nav_2d_msgs::Path2D path = traceback_->getPath(potential_grid_, start.pose, goal.pose, path_cost);
+  nav_2d_msgs::Path2D path = traceback_->getPath(potential_grid_, temp_start_.pose, goal.pose, path_cost);
   if (print_statistics_)
   {
     ROS_INFO_NAMED("DluxGlobalPlanner",

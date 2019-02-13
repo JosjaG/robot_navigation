@@ -95,6 +95,8 @@ protected:
    */
   virtual bool shouldReturnCachedPathImmediately() const;
 
+  virtual void interpCB(const geometry_msgs::PoseStamped::ConstPtr& interp);
+
   /**
    * @brief Given a cached path is available and a new path, should the new path be the one returned?
    * @param new_path The new path
@@ -117,11 +119,14 @@ protected:
 
   // Path Caching
   bool path_caching_;
-  double improvement_threshold_;
+  double improvement_threshold_, max_interp_distance_, dist_interp_;
   nav_2d_msgs::Path2D cached_path_;
   unsigned int cached_goal_x_, cached_goal_y_;
   double cached_path_cost_;
-
+  
+  ros::Subscriber interp_sub_;
+  ros::Publisher chatter_pub_;
+  nav_2d_msgs::Pose2DStamped interp_, temp_start_;
   // potential publishing
   nav_grid_pub_sub::ScaleGridPublisher<float> potential_pub_;
 
