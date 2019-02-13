@@ -125,7 +125,7 @@ protected:
   double cached_path_cost_;
   
   ros::Subscriber interp_sub_;
-  ros::Publisher chatter_pub_;
+  ros::Publisher replan_pub_;
   nav_2d_msgs::Pose2DStamped interp_, temp_start_;
   // potential publishing
   nav_grid_pub_sub::ScaleGridPublisher<float> potential_pub_;
